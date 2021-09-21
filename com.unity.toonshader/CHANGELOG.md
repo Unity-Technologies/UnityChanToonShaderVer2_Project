@@ -1,6 +1,8 @@
 # Changelog
+## [0.4.0-preview] - 2021-09-29
+* nothing yet.
 ## [0.3.1-preview] - 2021-09-27
-* Nothing yet
+* HDRP: Fixed Gaps between self-shadow and DXR raytrace shadow.
 ## [0.3.0-preview] - 2021-09-16
 * HDRP: Fixed wiered steps when more than 3 point lights are in a scene.
 * HDRP: Added Toon EV Adjustement per Model.
