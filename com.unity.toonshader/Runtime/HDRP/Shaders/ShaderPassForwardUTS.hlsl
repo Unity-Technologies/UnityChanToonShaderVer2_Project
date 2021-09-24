@@ -354,7 +354,7 @@ void Frag(PackedVaryingsToPS packedInput,
                 else
                 {
                     float r = UNITY_SAMPLE_SCREEN_SHADOW(_RaytracedHardShadow, float4(posInput.positionNDC.xy, 0.0, 1));
-                    context.shadowValue = min(GetScreenSpaceColorShadow(posInput, light.screenSpaceShadowIndex).SHADOW_TYPE_SWIZZLE), context.shadowValue);
+                    context.shadowValue = min(r, context.shadowValue);
                 }
 #endif // UTS_USE_RAYTRACING_SHADOW
             }
