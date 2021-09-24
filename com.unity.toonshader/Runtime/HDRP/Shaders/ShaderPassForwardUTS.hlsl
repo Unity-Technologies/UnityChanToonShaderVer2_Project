@@ -520,6 +520,9 @@ void Frag(PackedVaryingsToPS packedInput,
                         s_lightData.angleScale, s_lightData.angleOffset);
                     float3 additionalLightColor = ApplyCurrentExposureMultiplier(s_lightData.color) * attenuation;
                     const float notDirectional = 1.0f;
+
+
+
 #if defined(UTS_DEBUG_SELFSHADOW)
 
 #elif defined(_SHADINGGRADEMAP) || defined(UTS_DEBUG_SHADOWMAP) 
@@ -527,6 +530,8 @@ void Frag(PackedVaryingsToPS packedInput,
 #else
                     finalColor += UTS_OtherLights(input, i_normalDir, additionalLightColor, L, notDirectional, channelAlpha);
 #endif
+                    SHADOW_TYPE shadow = EvaluateShadow_Punctual(context, posInput, s_lightData, builtinData, GetNormalForShadowBias(bsdfData), L, distances);
+                    finalColor.rgb *= ComputeShadowColor(shadow, s_lightData.shadowTint, s_lightData.penumbraTint);
                 }
 
             }
