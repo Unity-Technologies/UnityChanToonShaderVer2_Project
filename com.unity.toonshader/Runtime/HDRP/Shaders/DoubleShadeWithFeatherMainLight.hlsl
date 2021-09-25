@@ -62,10 +62,9 @@ float3 UTS_MainLight(LightLoopContext lightLoopContext, FragInputs input, int ma
     float shadowAttenuation = (float)lightLoopContext.shadowValue;
 
 
-    float3 mainLihgtDirection = -_DirectionalLightDatas[mainLightIndex].forward;
-    float3 mainLightColor = ApplyCurrentExposureMultiplier(_DirectionalLightDatas[mainLightIndex].color);
-//    float4 tmpColor = EvaluateLight_Directional(context, posInput, _DirectionalLightDatas[mainLightIndex]);
-//    float3 mainLightColor = tmpColor.xyz;
+    float3 mainLihgtDirection = mainLightIndex >= 0 ? -_DirectionalLightDatas[mainLightIndex].forward : float3(1.0, 0.0, 0.0);
+    float3 mainLightColor = mainLightIndex >= 0 ? ApplyCurrentExposureMultiplier(_DirectionalLightDatas[mainLightIndex].color) : 0.0;
+
     float3 defaultLightDirection = normalize(UNITY_MATRIX_V[2].xyz + UNITY_MATRIX_V[1].xyz);
     float3 defaultLightColor = saturate(max(float3(0.05, 0.05, 0.05) * _Unlit_Intensity, max(ShadeSH9(float4(0.0, 0.0, 0.0, 1.0)), ShadeSH9(float4(0.0, -1.0, 0.0, 1.0)).rgb) * _Unlit_Intensity));
     float3 customLightDirection = normalize(mul(UNITY_MATRIX_M, float4(((float3(1.0, 0.0, 0.0) * _Offset_X_Axis_BLD * 10) + (float3(0.0, 1.0, 0.0) * _Offset_Y_Axis_BLD * 10) + (float3(0.0, 0.0, -1.0) * lerp(-1.0, 1.0, _Inverse_Z_Axis_BLD))), 0)).xyz);

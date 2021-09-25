@@ -68,8 +68,8 @@ float3 UTS_MainLightShadingGrademap(LightLoopContext lightLoopContext, FragInput
     DirectionalShadowType shadowAttenuation = lightLoopContext.shadowValue;
 
 
-    float3 mainLihgtDirection = -_DirectionalLightDatas[mainLightIndex].forward;
-    float3 mainLightColor = ApplyCurrentExposureMultiplier(_DirectionalLightDatas[mainLightIndex].color);
+    float3 mainLihgtDirection = mainLightIndex >= 0 ? -_DirectionalLightDatas[mainLightIndex].forward : float3(1.0, 0.0, 0.0);
+    float3 mainLightColor = mainLightIndex >= 0 ? ApplyCurrentExposureMultiplier(_DirectionalLightDatas[mainLightIndex].color) : 0.0;
 
 
     //v.2.0.4

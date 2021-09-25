@@ -3,7 +3,7 @@
 //toshiyuki@unity3d.com (Universal RP/HDRP) 
 
 float3 UTS_OtherLightsShadingGrademap(FragInputs input, float3 i_normalDir,
-    float3 additionalLightColor, float3 lightDirection, float notDirectional, out float channelOutAlpha)
+    float3 additionalLightColor, float3 lightDirection, float notDirectional,float shadowAttenuation, out float channelOutAlpha)
 {
     channelOutAlpha = 1.0f;
 #ifdef _IS_CLIPPING_MATTE
@@ -108,7 +108,8 @@ float3 UTS_OtherLightsShadingGrademap(FragInputs input, float3 i_normalDir,
     float _1stColorFeatherForMask = lerp(_1st_ShadeColor_Feather, 0.0f, max(_FirstShadeOverridden, _ComposerMaskMode));
     float _2ndColorFeatherForMask = lerp(_2nd_ShadeColor_Feather, 0.0f, max(_SecondShadeOverridden, _ComposerMaskMode));
 
-    //
+    float _SystemShadowsLevel_var = (shadowAttenuation * 0.5) + 0.5 + _Tweak_SystemShadowsLevel > 0.001 ? (shadowAttenuation * 0.5) + 0.5 + _Tweak_SystemShadowsLevel : 0.0001;
+
     float Set_FinalShadowMask = saturate((1.0 + ((Set_ShadingGrade - (_1st_ShadeColor_Step - _1stColorFeatherForMask)) * (0.0 - 1.0)) / (_1st_ShadeColor_Step - (_1st_ShadeColor_Step - _1stColorFeatherForMask))));
     float Set_ShadeShadowMask = saturate((1.0 + ((Set_ShadingGrade - (_2nd_ShadeColor_Step - _2ndColorFeatherForMask)) * (0.0 - 1.0)) / (_2nd_ShadeColor_Step - (_2nd_ShadeColor_Step - _2ndColorFeatherForMask)))); // 1st and 2nd Shades Mask
 

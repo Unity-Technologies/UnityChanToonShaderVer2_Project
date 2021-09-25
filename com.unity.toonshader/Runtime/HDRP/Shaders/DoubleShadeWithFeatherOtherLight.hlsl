@@ -3,7 +3,7 @@
 //toshiyuki@unity3d.com (Universal RP/HDRP) 
 
 float3 UTS_OtherLights(FragInputs input, float3 i_normalDir,
-	float3 additionalLightColor, float3 lightDirection, float notDirectional, out float channelOutAlpha)
+	float3 additionalLightColor, float3 lightDirection, float notDirectional, float shadowAttenuation, out float channelOutAlpha)
 {
 	channelOutAlpha = 1.0f;
 #ifdef _IS_CLIPPING_MATTE
@@ -34,7 +34,6 @@ float3 UTS_OtherLights(FragInputs input, float3 i_normalDir,
     float3 viewDirection = V;
     float4 _MainTex_var = SAMPLE_TEXTURE2D_LOD(_MainTex, sampler_MainTex, TRANSFORM_TEX(Set_UV0, _MainTex), 0.0f);
     /* end of todo.*/
-
 
 
     //v.2.0.5: 
@@ -79,7 +78,12 @@ float3 UTS_OtherLights(FragInputs input, float3 i_normalDir,
     //v.2.0.5:
     float _1stColorFeatherForMask = lerp(_BaseShade_Feather, 0.0f, max(_FirstShadeOverridden, _ComposerMaskMode));
     float _2ndColorFeatherForMask = lerp(_1st2nd_Shades_Feather, 0.0f, max(_SecondShadeOverridden, _ComposerMaskMode));
-    float Set_FinalShadowMask = saturate((1.0 + ((lerp(_HalfLambert_var, (_HalfLambert_var * saturate(1.0 + _Tweak_SystemShadowsLevel)), _Set_SystemShadowsToBase) - (_BaseColor_Step - _1stColorFeatherForMask)) * ((1.0 - _Set_1st_ShadePosition_var.rgb).r - 1.0)) / (_BaseColor_Step - (_BaseColor_Step - _1stColorFeatherForMask))));
+
+
+    float _SystemShadowsLevel_var = (shadowAttenuation * 0.5) + 0.5 + _Tweak_SystemShadowsLevel > 0.001 ? (shadowAttenuation * 0.5) + 0.5 + _Tweak_SystemShadowsLevel : 0.0001;
+
+//    float Set_FinalShadowMask = saturate((1.0 + ((lerp(_HalfLambert_var, (_HalfLambert_var * saturate(1.0 + _Tweak_SystemShadowsLevel)), _Set_SystemShadowsToBase) - (_BaseColor_Step - _1stColorFeatherForMask)) * ((1.0 - _Set_1st_ShadePosition_var.rgb).r - 1.0)) / (_BaseColor_Step - (_BaseColor_Step - _1stColorFeatherForMask))));
+    float Set_FinalShadowMask = saturate((1.0 + ((lerp(_HalfLambert_var, _HalfLambert_var * saturate(_SystemShadowsLevel_var), _Set_SystemShadowsToBase) - (_BaseColor_Step - _1stColorFeatherForMask)) * ((1.0 - _Set_1st_ShadePosition_var.rgb).r - 1.0)) / (_BaseColor_Step - (_BaseColor_Step - _1stColorFeatherForMask))));
 
 
 
