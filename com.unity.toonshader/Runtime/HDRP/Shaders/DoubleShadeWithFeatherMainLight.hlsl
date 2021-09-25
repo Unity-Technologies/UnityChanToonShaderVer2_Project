@@ -2,7 +2,7 @@
 //nobuyuki@unity3d.com
 //toshiyuki@unity3d.com (Universal RP/HDRP) 
 
-float3 UTS_MainLight(LightLoopContext lightLoopContext, FragInputs input, int mainLightIndex, out float inverseClipping, out float channelOutAlpha, out UTSData utsData)
+float3 UTS_MainLight(LightLoopContext lightLoopContext, FragInputs input, uint featureFlags, BuiltinData builtInData, out float inverseClipping, out float channelOutAlpha, out UTSData utsData)
 {
     channelOutAlpha = 1.0f;
     uint2 tileIndex = uint2(input.positionSS.xy) / GetTileSize();
@@ -61,9 +61,13 @@ float3 UTS_MainLight(LightLoopContext lightLoopContext, FragInputs input, int ma
 
     float shadowAttenuation = (float)lightLoopContext.shadowValue;
 
+    int mainLightIndex = GetUtsMainLightIndex(builtinData);
 
     float3 mainLihgtDirection = mainLightIndex >= 0 ? -_DirectionalLightDatas[mainLightIndex].forward : float3(1.0, 0.0, 0.0);
     float3 mainLightColor = mainLightIndex >= 0 ? ApplyCurrentExposureMultiplier(_DirectionalLightDatas[mainLightIndex].color) : 0.0;
+
+
+
 
     float3 defaultLightDirection = normalize(UNITY_MATRIX_V[2].xyz + UNITY_MATRIX_V[1].xyz);
     float3 defaultLightColor = saturate(max(float3(0.05, 0.05, 0.05) * _Unlit_Intensity, max(ShadeSH9(float4(0.0, 0.0, 0.0, 1.0)), ShadeSH9(float4(0.0, -1.0, 0.0, 1.0)).rgb) * _Unlit_Intensity));
@@ -75,6 +79,72 @@ float3 UTS_MainLight(LightLoopContext lightLoopContext, FragInputs input, int ma
     originalLightColor = lerp(originalLightColor, clamp(originalLightColor, ConvertFromEV100(_ToonEvAdjustmentValueMin ), ConvertFromEV100(_ToonEvAdjustmentValueMax)), _ToonEvAdjustmentCurve);
     float3 lightColor = lerp(max(defaultLightColor, originalLightColor), max(defaultLightColor, saturate(originalLightColor)), max(_Is_Filter_LightColor, _ToonLightHiCutFilter));
 
+    ////// Add light color 0.4.0-preview
+    float _HalfLambert_var = 0;
+    if (featureFlags & LIGHTFEATUREFLAGS_PUNCTUAL)
+    {
+        uint lightCount, lightStart;
+
+#ifndef LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
+        GetCountAndStart(posInput, LIGHTCATEGORY_PUNCTUAL, lightStart, lightCount);
+#else   // LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
+        lightCount = _PunctualLightCount;
+        lightStart = 0;
+#endif
+        bool fastPath = false;
+#if SCALARIZE_LIGHT_LOOP
+        uint lightStartLane0;
+        fastPath = IsFastPath(lightStart, lightStartLane0);
+
+        if (fastPath)
+        {
+            lightStart = lightStartLane0;
+        }
+#endif
+        uint v_lightListOffset = 0;
+        uint v_lightIdx = lightStart;
+        float channelAlpha = 0.0f;
+        [loop] // vulkan shader compiler can not unroll.
+        while (v_lightListOffset < lightCount)
+        {
+            v_lightIdx = FetchIndex(lightStart, v_lightListOffset);
+            uint s_lightIdx = ScalarizeElementIndex(v_lightIdx, fastPath);
+            if (s_lightIdx == -1)
+                break;
+
+            LightData s_lightData = FetchLight(s_lightIdx);
+
+
+            // If current scalar and vector light index match, we process the light. The v_lightListOffset for current thread is increased.
+            // Note that the following should really be ==, however, since helper lanes are not considered by WaveActiveMin, such helper lanes could
+            // end up with a unique v_lightIdx value that is smaller than s_lightIdx hence being stuck in a loop. All the active lanes will not have this problem.
+            if (s_lightIdx >= v_lightIdx)
+            {
+                v_lightListOffset++;
+
+
+                if (IsMatchingLightLayer(s_lightData.lightLayers, builtinData.renderingLayers))
+                {
+                    float3 L;
+                    float4 distances; // {d, d^2, 1/d, d_proj}
+                    GetPunctualLightVectors(posInput.positionWS, s_lightData, L, distances);
+                    real attenuation = PunctualLightAttenuation(distances, s_lightData.rangeAttenuationScale, s_lightData.rangeAttenuationBias,
+                        s_lightData.angleScale, s_lightData.angleOffset);
+                    float3 additionalLightColor = ApplyCurrentExposureMultiplier(s_lightData.color) * attenuation;
+                    const float notDirectional = 1.0f;
+
+                    // originaly in DoubleShadeWithFetherOgherLight
+                        float3 viewDirection = V;
+                    float3 normalDirection = normalize(mul(normalLocal, tangentTransform)); // Perturbed normals
+                    float3 addPassLightColor = (0.5 * dot(lerp(i_normalDir, normalDirection, _Is_NormalMapToBase), lightDirection) + 0.5) * additionalLightColor.rgb;
+                    float  pureIntencity = max(0.001, (0.299 * additionalLightColor.r + 0.587 * additionalLightColor.g + 0.114 * additionalLightColor.b));
+                    float3 lightColor = max(0, lerp(addPassLightColor, lerp(0, min(addPassLightColor, addPassLightColor / pureIntencity), notDirectional), _Is_Filter_LightColor));
+                    float3 halfDirection = normalize(viewDirection + lightDirection); // has to be recalced here.
+//                    _HalfLambert_var = _HalfLambert_var + (0.5 * dot(lerp(i_normalDir, utsData.normalDirection, _Is_NormalMapToBase), lightDirection) + 0.5);
+                }
+            }
+        }
+    }
 
     ////// Lighting:
     float3 halfDirection = normalize(utsData.viewDirection + lightDirection);
@@ -127,7 +197,7 @@ float3 UTS_MainLight(LightLoopContext lightLoopContext, FragInputs input, int ma
     //v.2.0.5
     float4 _2nd_ShadeMap_var = lerp(SAMPLE_TEXTURE2D(_2nd_ShadeMap, sampler_MainTex,TRANSFORM_TEX(Set_UV0, _2nd_ShadeMap)), _1st_ShadeMap_var, _Use_1stAs2nd);
     float3 Set_2nd_ShadeColor = lerp((_2nd_ShadeColor.rgb * _2nd_ShadeMap_var.rgb), ((_2nd_ShadeColor.rgb * _2nd_ShadeMap_var.rgb) * Set_LightColor), _Is_LightColor_2nd_Shade);
-    float _HalfLambert_var = 0.5 * dot(lerp(i_normalDir, utsData.normalDirection, _Is_NormalMapToBase), lightDirection) + 0.5;
+    _HalfLambert_var = _HalfLambert_var + (0.5 * dot(lerp(i_normalDir, utsData.normalDirection, _Is_NormalMapToBase), lightDirection) + 0.5);
     float4 _Set_2nd_ShadePosition_var = tex2D(_Set_2nd_ShadePosition, TRANSFORM_TEX(Set_UV0, _Set_2nd_ShadePosition));
     float4 _Set_1st_ShadePosition_var = tex2D(_Set_1st_ShadePosition, TRANSFORM_TEX(Set_UV0, _Set_1st_ShadePosition));
 

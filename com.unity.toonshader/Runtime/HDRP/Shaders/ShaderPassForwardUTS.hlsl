@@ -101,6 +101,8 @@ float ApplyChannelAlpha(float alpha)
 }
 
 
+
+
 bool UtsUseScreenSpaceShadow(DirectionalLightData light, float3 normalWS)
 {
 #if defined(RAY_TRACED_SCREEN_SPACE_SHADOW_FLAG)
@@ -174,15 +176,14 @@ void Frag(PackedVaryingsToPS packedInput,
 #else
     uint featureFlags = LIGHT_FEATURE_MASK_FLAGS_OPAQUE;
 #endif
-    SurfaceData surfaceData;
-    BuiltinData builtinData;
+    SurfaceData surfaceData; // used to get  normalWS;
+    BuiltinData builtinData; // used to get lightlayersAndSoOn
     GetSurfaceAndBuiltinData(input, V, posInput, surfaceData, builtinData);
 
 
 
-    BSDFData bsdfData = ConvertSurfaceDataToBSDFData(input.positionSS.xy, surfaceData);
-
-    PreLightData preLightData = GetPreLightData(V, posInput, bsdfData);
+    BSDFData bsdfData = ConvertSurfaceDataToBSDFData(input.positionSS.xy, surfaceData); // used to calc shadow
+    PreLightData preLightData = GetPreLightData(V, posInput, bsdfData);                 // used to calc shadow
 
     outColor = float4(0.0, 0.0, 0.0, 0.0);
 
@@ -210,7 +211,69 @@ void Frag(PackedVaryingsToPS packedInput,
     float channelAlpha = 0.0f;
     float3 finalColor = float3(0.0f, 0.0f, 0.0f);
 
+    if (featureFlags & LIGHTFEATUREFLAGS_DIRECTIONAL)
+    {
+        // Evaluate sun shadows.
+        if (_DirectionalShadowIndex >= 0)
+        {
+            DirectionalLightData light = _DirectionalLightDatas[_DirectionalShadowIndex];
+#if defined(SCREEN_SPACE_SHADOWS_ON) && !defined(_SURFACE_TYPE_TRANSPARENT) && !defined(UTS_USE_RAYTRACING_SHADOW)
+            if (UtsUseScreenSpaceShadow(light, bsdfData.normalWS))
+            {
+                // HDRP Contact Shadow
+                context.shadowValue = min(GetScreenSpaceColorShadow(posInput, light.screenSpaceShadowIndex).SHADOW_TYPE_SWIZZLE, context.shadowValue);
+            }
+            else
+#endif
+            {
+                // TODO: this will cause us to load from the normal buffer first. Does this cause a performance problem?
+                float3 L = -light.forward;
 
+                // Is it worth sampling the shadow map?
+                if ((light.lightDimmer > 0) && (light.shadowDimmer > 0) && // Note: Volumetric can have different dimmer, thus why we test it here
+                    IsNonZeroBSDF(V, L, preLightData, bsdfData) &&
+                    !ShouldEvaluateThickObjectTransmission(V, L, preLightData, bsdfData, light.shadowIndex))
+                {
+
+#if defined(UTS_USE_RAYTRACING_SHADOW)
+                    {
+                        /*
+                        struct PositionInputs
+                        {
+                            float3 positionWS;  // World space position (could be camera-relative)
+                            float2 positionNDC; // Normalized screen coordinates within the viewport    : [0, 1) (with the half-pixel offset)
+                            uint2  positionSS;  // Screen space pixel coordinates                       : [0, NumPixels)
+                            uint2  tileCoord;   // Screen tile coordinates                              : [0, NumTiles)
+                            float  deviceDepth; // Depth from the depth buffer                          : [0, 1] (typically reversed)
+                            float  linearDepth; // View space Z coordinate                              : [Near, Far]
+                        };
+                        float4 size = _RaytracedHardShadow_TexelSize;
+                        */
+
+                        float r = UNITY_SAMPLE_SCREEN_SHADOW(_RaytracedHardShadow, float4(posInput.positionNDC.xy, 0.0, 1));
+                        context.shadowValue = min(r, context.shadowValue);
+                    }
+#else
+                    {
+                        context.shadowValue = min(GetDirectionalShadowAttenuation(context.shadowContext,
+                            posInput.positionSS, posInput.positionWS, GetNormalForShadowBias(bsdfData),
+                            light.shadowIndex, L), context.shadowValue);
+
+                    }
+#endif // UTS_USE_RAYTRACING_SHADOW
+
+
+                }
+#if defined (UTS_USE_RAYTRACING_SHADOW)
+                else
+                {
+                    float r = UNITY_SAMPLE_SCREEN_SHADOW(_RaytracedHardShadow, float4(posInput.positionNDC.xy, 0.0, 1));
+                    context.shadowValue = min(r, context.shadowValue);
+                }
+#endif // UTS_USE_RAYTRACING_SHADOW
+            }
+        }
+    }
 
 #undef EVALUATE_BSDF_ENV
 #undef EVALUATE_BSDF_ENV_SKY
@@ -235,69 +298,7 @@ void Frag(PackedVaryingsToPS packedInput,
             lightStart = lightStartLane0;
         }
 #endif
-        if (featureFlags & LIGHTFEATUREFLAGS_DIRECTIONAL)
-        {
-            // Evaluate sun shadows.
-            if (_DirectionalShadowIndex >= 0)
-            {
-                DirectionalLightData light = _DirectionalLightDatas[_DirectionalShadowIndex];
-#if defined(SCREEN_SPACE_SHADOWS_ON) && !defined(_SURFACE_TYPE_TRANSPARENT) && !defined(UTS_USE_RAYTRACING_SHADOW)
-                if (UtsUseScreenSpaceShadow(light, bsdfData.normalWS))
-                {
-                    // HDRP Contact Shadow
-                    context.shadowValue = min(GetScreenSpaceColorShadow(posInput, light.screenSpaceShadowIndex).SHADOW_TYPE_SWIZZLE, context.shadowValue);
-                }
-                else
-#endif
-                {
-                    // TODO: this will cause us to load from the normal buffer first. Does this cause a performance problem?
-                    float3 L = -light.forward;
 
-                    // Is it worth sampling the shadow map?
-                    if ((light.lightDimmer > 0) && (light.shadowDimmer > 0) && // Note: Volumetric can have different dimmer, thus why we test it here
-                        IsNonZeroBSDF(V, L, preLightData, bsdfData) &&
-                        !ShouldEvaluateThickObjectTransmission(V, L, preLightData, bsdfData, light.shadowIndex))
-                    {
-
-#if defined(UTS_USE_RAYTRACING_SHADOW)
-                        {
-                            /*
-                            struct PositionInputs
-                            {
-                                float3 positionWS;  // World space position (could be camera-relative)
-                                float2 positionNDC; // Normalized screen coordinates within the viewport    : [0, 1) (with the half-pixel offset)
-                                uint2  positionSS;  // Screen space pixel coordinates                       : [0, NumPixels)
-                                uint2  tileCoord;   // Screen tile coordinates                              : [0, NumTiles)
-                                float  deviceDepth; // Depth from the depth buffer                          : [0, 1] (typically reversed)
-                                float  linearDepth; // View space Z coordinate                              : [Near, Far]
-                            };
-                            float4 size = _RaytracedHardShadow_TexelSize;
-                            */
-
-                            float r = UNITY_SAMPLE_SCREEN_SHADOW(_RaytracedHardShadow, float4(posInput.positionNDC.xy, 0.0, 1));
-                            context.shadowValue = min(r, context.shadowValue);
-                        }
-#else
-                        {
-                            context.shadowValue = min(GetDirectionalShadowAttenuation(context.shadowContext,
-                                posInput.positionSS, posInput.positionWS, GetNormalForShadowBias(bsdfData),
-                                light.shadowIndex, L), context.shadowValue);
-
-                        }
-#endif // UTS_USE_RAYTRACING_SHADOW
-
-
-                    }
-#if defined (UTS_USE_RAYTRACING_SHADOW)
-                    else
-                    {
-                        float r = UNITY_SAMPLE_SCREEN_SHADOW(_RaytracedHardShadow, float4(posInput.positionNDC.xy, 0.0, 1));
-                        context.shadowValue = min(r, context.shadowValue);
-                    }
-#endif // UTS_USE_RAYTRACING_SHADOW
-                }
-            }
-        }
 
 
         // Scalarized loop. All lights that are in a tile/cluster touched by any pixel in the wave are loaded (scalar load), only the one relevant to current thread/pixel are processed.
@@ -348,9 +349,9 @@ void Frag(PackedVaryingsToPS packedInput,
 #if defined(UTS_DEBUG_SELFSHADOW)
 
 #elif defined(_SHADINGGRADEMAP) || defined(UTS_DEBUG_SHADOWMAP) 
-                    finalColor += UTS_OtherLightsShadingGrademap(input, i_normalDir, additionalLightColor, L, notDirectional, shadow, channelAlpha);
+//                    finalColor += UTS_OtherLightsShadingGrademap(input, i_normalDir, additionalLightColor, L, notDirectional, shadow, channelAlpha);
 #else
-                    finalColor += UTS_OtherLights(input, i_normalDir, additionalLightColor, L, notDirectional, shadow, channelAlpha);
+//                    finalColor += UTS_OtherLights(input, i_normalDir, additionalLightColor, L, notDirectional, shadow, channelAlpha);
 #endif
 //                    finalColor *= shadow;
                 }
@@ -358,26 +359,27 @@ void Frag(PackedVaryingsToPS packedInput,
             }
         }
     }
+
     //v.2.0.7
     if (featureFlags & LIGHTFEATUREFLAGS_DIRECTIONAL)
     {
 
 
-        int mainLightIndex = GetUtsMainLightIndex(builtinData);
-        if (mainLightIndex >= 0)
+ //       int mainLightIndex = GetUtsMainLightIndex(builtinData);
+ //       if (mainLightIndex >= 0)
         {
 #if defined(UTS_DEBUG_SELFSHADOW)
             if (_DirectionalShadowIndex >= 0)
                 finalColor = UTS_SelfShdowMainLight(context, input, _DirectionalShadowIndex);
 #elif defined(_SHADINGGRADEMAP)|| defined(UTS_DEBUG_SHADOWMAP) 
-            finalColor += UTS_MainLightShadingGrademap(context, input, mainLightIndex, inverseClipping, channelAlpha, utsData);
+            finalColor += UTS_MainLightShadingGrademap(context, input, builtinData, inverseClipping, channelAlpha, utsData);
 #else
-            finalColor += UTS_MainLight(context, input, mainLightIndex, inverseClipping, channelAlpha, utsData);
+            finalColor += UTS_MainLight(context, input, featureFlags, builtinData, inverseClipping, channelAlpha, utsData);
 #endif
         }
 
 
-
+#if 0
         int i = 0; // Declare once to avoid the D3D11 compiler warning.
 
         for (i = 0; i < (int)_DirectionalLightCount; ++i)
@@ -403,8 +405,9 @@ void Frag(PackedVaryingsToPS packedInput,
                 }
             }
         }
-
+#endif
     }
+
 
 #ifdef _EMISSIVE_SIMPLE
     float4 _Emissive_Tex_var = tex2D(_Emissive_Tex, TRANSFORM_TEX(Set_UV0, _Emissive_Tex));
